@@ -1,0 +1,35 @@
+{
+  "name": "@podlove/source-publisher",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "axios": "0.20.0",
+    "lodash": "4.17.20",
+    "debug": "4.1.1",
+    "promise-sequential": "1.1.1",
+    "@podlove/utils": "5.2.3",
+    "image-downloader": "4.0.1",
+    "hasha": "5.2.1",
+    "fs-extra": "9.0.1"
+  },
+  "devDependencies": {
+    "prettier": "2.1.2",
+    "husky": "4.3.0",
+    "pretty-quick": "3.0.2"
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "pretty-quick --staged"
+    }
+  }
+}
