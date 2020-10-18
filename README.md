@@ -4,6 +4,8 @@
 
 ## Requirements
 
+- Podlove Publisher with in version 3.1 or later
+
 ## Installation
 
 1. Install the package
