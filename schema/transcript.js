@@ -8,7 +8,7 @@ const name = (prefix) => `${prefix}Transcript`
 const schema = (prefix) => ({
   name: name(prefix),
   fields: {
-    speaker: contributor.name(prefix),
+    speaker: 'Int',
     start: 'Int',
     end: 'Int',
     text: 'String'

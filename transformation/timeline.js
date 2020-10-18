@@ -10,8 +10,7 @@ const isNewChunk = (current, previous) => {
   const endOfSentence = endsWith('.', text) || endsWith('!', text) || endsWith('?', text)
 
   return (
-    get(current, 'speaker') !== get(previous, ['speaker', 'id']) ||
-    (text.length > 1500 && endOfSentence)
+    get(current, 'speaker') !== get(previous, ['speaker']) || (text.length > 1500 && endOfSentence)
   )
 }
 

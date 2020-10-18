@@ -197,17 +197,9 @@ class PodloveSource {
     const duration = toPlayerTime(data.duration)
 
     debug(`Fetch Transcripts for Episode ${id} from ${this.routes.transcripts(id)}`)
-    const transcripts = await this.fetch(this.routes.transcripts(id), [])
-      .then(map(transcript.normalizer))
-      .then((transcripts) =>
-        transcripts.map((transcript) => ({
-          ...transcript,
-          speaker: this.actions.createReference(
-            contributor.name(this.options.typeName),
-            transcript.contributor
-          )
-        }))
-      )
+    const transcripts = await this.fetch(this.routes.transcripts(id), []).then(
+      map(transcript.normalizer)
+    )
 
     debug(`Fetch Contributors for Episode ${id} from ${this.routes.episodeContributors(id)}`)
     const contributorList = await this.fetch(this.routes.episodeContributors(id), []).then(
@@ -220,7 +212,7 @@ class PodloveSource {
         .reduce(transformations.chapters(duration), [])
         .map(async (chapter) => ({
           ...chapter,
-          image: this.cacheImage(chapter.image)
+          image: await this.cacheImage(chapter.image)
         }))
     )
 
@@ -232,7 +224,18 @@ class PodloveSource {
         chapters,
         transcripts
       }),
-      timeline: transformations.timeline({ duration, chapters, transcripts }),
+      timeline: transformations.timeline({ duration, chapters, transcripts }).map((item) => {
+        if (item.type === 'transcript') {
+          return {
+            ...item,
+            speaker: this.actions.createReference(
+              contributor.name(this.options.typeName),
+              item.speaker
+            )
+          }
+        }
+        return item
+      }),
       contributors: contributorList.map((mapping) => ({
         details: this.actions.createReference(
           contributor.name(this.options.typeName),

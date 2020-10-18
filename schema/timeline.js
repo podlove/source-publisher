@@ -11,7 +11,7 @@ const schema = (prefix) => ({
     end: 'Int',
     title: 'String',
     node: 'String',
-    speaker: `[${contributor.name(prefix)}]`,
+    speaker: `${contributor.name(prefix)}`,
     texts: `[${transcriptChunk.name(prefix)}]`
   }
 })
