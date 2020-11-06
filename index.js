@@ -4,6 +4,7 @@ const { get, noop } = require('lodash')
 const { map } = require('lodash/fp')
 const sequential = require('promise-sequential')
 const { toPlayerTime } = require('@podlove/utils/time')
+const wordsCounter = require('word-counting')
 
 const cache = require('./lib/cache')
 const fetch = require('./lib/fetch')
@@ -20,6 +21,8 @@ const group = require('./schema/group')
 const role = require('./schema/role')
 const episodeContributor = require('./schema/episode-contributor')
 const timeline = require('./schema/timeline')
+const contributorStatistic = require('./schema/contributor-statistics')
+const contributorEpisodeStatistics = require('./schema/contributor-statistics-episode')
 
 class PodloveSource {
   static defaultOptions() {
@@ -40,7 +43,8 @@ class PodloveSource {
       episode: noop,
       contributor: noop,
       group: noop,
-      role: noop
+      role: noop,
+      contributorStatistic: noop
     }
 
     this.cacheImage = cache.image(path.resolve(this.options.imageCache))
@@ -72,6 +76,7 @@ class PodloveSource {
       await this.loadGroups()
       await this.loadRoles()
       await this.loadEpisodes()
+      await this.calculateContributorStatistic()
     })
   }
 
@@ -94,6 +99,12 @@ class PodloveSource {
     const EpisodeContributor = schema.createObjectType(
       episodeContributor.schema(this.options.typeName)
     )
+    const ContributorStatistic = schema.createObjectType(
+      contributorStatistic.schema(this.options.typeName)
+    )
+    const ContributorEpisodeStatistic = schema.createObjectType(
+      contributorEpisodeStatistics.schema(this.options.typeName)
+    )
 
     addSchemaTypes([
       Chapter,
@@ -106,13 +117,18 @@ class PodloveSource {
       Contributor,
       Group,
       Role,
-      EpisodeContributor
+      EpisodeContributor,
+      ContributorStatistic,
+      ContributorEpisodeStatistic
     ])
 
     this.collections.episode = addCollection(episode.name(this.options.typeName))
     this.collections.contributor = addCollection(contributor.name(this.options.typeName))
     this.collections.group = addCollection(group.name(this.options.typeName))
     this.collections.role = addCollection(role.name(this.options.typeName))
+    this.collections.contributorStatistic = addCollection(
+      contributorStatistic.name(this.options.typeName)
+    )
   }
 
   /**
@@ -221,9 +237,9 @@ class PodloveSource {
       ...episode.normalizer({
         ...data,
         poster: await this.cacheImage(data.poster),
-        chapters,
-        transcripts
+        chapters
       }),
+      transcripts,
       timeline: transformations.timeline({ duration, chapters, transcripts }).map((item) => {
         if (item.type === 'transcript') {
           return {
@@ -245,6 +261,38 @@ class PodloveSource {
         group: this.actions.createReference(group.name(this.options.typeName), mapping.groupId)
       }))
     })
+  }
+
+  async calculateContributorStatistic() {
+    const episodes = this.collections.episode.data()
+
+    const statistics = transformations.contributorStatistics(
+      this.collections.contributor.data().map((item) => ({
+        id: item.id,
+        contributor: this.actions.createReference(contributor.name(this.options.typeName), item.id)
+      }))
+    )
+
+    episodes.forEach((data) => {
+      data.contributors.forEach((contributor) =>
+        statistics.addEpisode(contributor.details.id, {
+          episode: this.actions.createReference(episode.name(this.options.typeName), data.id),
+          role: contributor.role
+        })
+      )
+      data.transcripts.forEach((transcript) =>
+        statistics.update(transcript.speaker, data.id, {
+          talkTime: transcript.end - transcript.start,
+          words: wordsCounter(transcript.text).wordsCount
+        })
+      )
+    })
+
+    statistics
+      .data()
+      .forEach((contributorStatistic) =>
+        this.collections.contributorStatistic.addNode(contributorStatistic)
+      )
   }
 }
 
