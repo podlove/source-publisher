@@ -11,6 +11,7 @@ const fetch = require('./lib/fetch')
 const transformations = require('./transformation')
 
 const show = require('./schema/show')
+const statistics = require('./schema/statistics')
 const episode = require('./schema/episode')
 const chapter = require('./schema/chapter')
 const audio = require('./schema/audio')
@@ -23,6 +24,8 @@ const episodeContributor = require('./schema/episode-contributor')
 const timeline = require('./schema/timeline')
 const contributorStatistic = require('./schema/contributor-statistics')
 const contributorEpisodeStatistics = require('./schema/contributor-statistics-episode')
+const socialService = require('./schema/social-service')
+const contributorSocialService = require('./schema/contributor-social-service')
 
 class PodloveSource {
   static defaultOptions() {
@@ -44,7 +47,8 @@ class PodloveSource {
       contributor: noop,
       group: noop,
       role: noop,
-      contributorStatistic: noop
+      contributorStatistic: noop,
+      socialService: noop
     }
 
     this.cacheImage = cache.image(path.resolve(this.options.imageCache))
@@ -65,18 +69,22 @@ class PodloveSource {
       contributors: () => endpoint('contributors'),
       groups: () => endpoint('contributors', 'groups'),
       roles: () => endpoint('contributors', 'roles'),
-      episodeContributors: (id) => endpoint('contributors', 'episode', id)
+      episodeContributors: (id) => endpoint('contributors', 'episode', id),
+      socialServices: () => endpoint('social', 'services'),
+      contributorSocialService: (id) => endpoint('social', 'services', 'contributor', id)
     }
 
     api.loadSource(async (actions) => {
       this.actions = actions
       await this.registerCollections()
       await this.loadShow()
+      await this.loadSocialServices()
       await this.loadContributors()
       await this.loadGroups()
       await this.loadRoles()
       await this.loadEpisodes()
       await this.calculateContributorStatistic()
+      await this.calculatePodcastStatistics()
     })
   }
 
@@ -105,6 +113,10 @@ class PodloveSource {
     const ContributorEpisodeStatistic = schema.createObjectType(
       contributorEpisodeStatistics.schema(this.options.typeName)
     )
+    const ContributorSocialService = schema.createObjectType(
+      contributorSocialService.schema(this.options.typeName)
+    )
+    const SocialServices = schema.createObjectType(socialService.schema(this.options.typeName))
 
     addSchemaTypes([
       Chapter,
@@ -119,7 +131,10 @@ class PodloveSource {
       Role,
       EpisodeContributor,
       ContributorStatistic,
-      ContributorEpisodeStatistic
+      ContributorEpisodeStatistic,
+
+      SocialServices,
+      ContributorSocialService
     ])
 
     this.collections.episode = addCollection(episode.name(this.options.typeName))
@@ -129,6 +144,7 @@ class PodloveSource {
     this.collections.contributorStatistic = addCollection(
       contributorStatistic.name(this.options.typeName)
     )
+    this.collections.socialService = addCollection(socialService.name(this.options.typeName))
   }
 
   /**
@@ -155,12 +171,38 @@ class PodloveSource {
       contributors.map(async (data) => {
         debug(`Add Contributor ${data.name} [${data.id}]`)
         const avatar = await this.cacheImage(data.avatar)
-        return this.collections.contributor.addNode(
-          contributor.normalizer({
-            ...data,
-            avatar
-          })
+        const social = await this.fetch(
+          this.routes.contributorSocialService(data.id) + '?category=social',
+          []
+        ).then(
+          map((item) => ({
+            ...contributorSocialService.normalizer(item),
+            service: this.actions.createReference(
+              socialService.name(this.options.typeName),
+              item.service_id
+            )
+          }))
         )
+
+        const donation = await this.fetch(
+          this.routes.contributorSocialService(data.id) + '?category=donation',
+          []
+        ).then(
+          map((item) => ({
+            ...contributorSocialService.normalizer(item),
+            service: this.actions.createReference(
+              socialService.name(this.options.typeName),
+              item.service_id
+            )
+          }))
+        )
+
+        return this.collections.contributor.addNode({
+          ...contributor.normalizer(data),
+          avatar,
+          social,
+          donation
+        })
       })
     )
   }
@@ -184,11 +226,29 @@ class PodloveSource {
   async loadRoles() {
     debug(`Fetch Roles from ${this.routes.roles()}`)
     const roles = await this.fetch(this.routes.roles(), [])
-    roles.forEach(
-      (data) =>
-        debug(`Add Group ${data.title} [${data.id}]`) ||
-        this.collections.role.addNode(group.normalizer(data))
-    )
+    roles.forEach((data) => {
+      debug(`Add Group ${data.title} [${data.id}]`)
+      this.collections.role.addNode(group.normalizer(data))
+    })
+  }
+
+  /**
+   * SocialServices
+   */
+  async loadSocialServices() {
+    debug(`Fetch Social Services from ${this.routes.socialServices()}`)
+    await this.fetch(this.routes.socialServices(), [])
+      .then((services) =>
+        Promise.all(
+          services.map(async (data) => ({
+            ...socialService.normalizer(data),
+            logo: await this.cacheImage(data.logo_url)
+          }))
+        )
+      )
+      .then((services) =>
+        services.forEach((service) => this.collections.socialService.addNode(service))
+      )
   }
 
   /**
@@ -234,12 +294,10 @@ class PodloveSource {
 
     debug(`Add Episode ${data.title} [${id}]`)
     this.collections.episode.addNode({
-      ...episode.normalizer({
-        ...data,
-        poster: await this.cacheImage(data.poster),
-        chapters
-      }),
+      ...episode.normalizer(data),
+      poster: await this.cacheImage(data.poster),
       transcripts,
+      chapters,
       timeline: transformations.timeline({ duration, chapters, transcripts }).map((item) => {
         if (item.type === 'transcript') {
           return {
@@ -259,7 +317,14 @@ class PodloveSource {
         ),
         role: this.actions.createReference(role.name(this.options.typeName), mapping.roleId),
         group: this.actions.createReference(group.name(this.options.typeName), mapping.groupId)
-      }))
+      })),
+      ...transcripts.reduce(
+        (result, transcript) => ({
+          talkTime: result.talkTime + (transcript.end - transcript.start),
+          words: result.words + wordsCounter(transcript.text).wordsCount
+        }),
+        { talkTime: 0, words: 0 }
+      )
     })
   }
 
@@ -293,6 +358,34 @@ class PodloveSource {
       .forEach((contributorStatistic) =>
         this.collections.contributorStatistic.addNode(contributorStatistic)
       )
+  }
+
+  async calculatePodcastStatistics() {
+    const episodes = this.collections.episode.data()
+
+    this.actions.addMetadata(
+      statistics.name(this.options.typeName),
+      episodes.reduce(
+        (result, episode) => {
+          const transcripts = get(episode, 'transcripts', [])
+          const words = transcripts.reduce(
+            (res, transcript) => res + wordsCounter(transcript.text).wordsCount,
+            0
+          )
+          const talkTime = transcripts.reduce(
+            (res, transcript) => res + transcript.end - transcript.start,
+            0
+          )
+
+          return {
+            episodes: result.episodes + 1,
+            talkTime: result.talkTime + talkTime,
+            words: result.words + words
+          }
+        },
+        { episodes: 0, talkTime: 0, words: 0 }
+      )
+    )
   }
 }
 

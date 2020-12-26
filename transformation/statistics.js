@@ -50,6 +50,7 @@ const contributorStatistics = (contributors) => {
           ...contributorResult,
           {
             ...contr,
+            id: contributorId,
             episodes: Object.values(contr.episodes)
           }
         ]

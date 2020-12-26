@@ -1,4 +1,4 @@
-const { get, getOr, compose, map } = require('lodash/fp')
+const { get, getOr, compose, map, reduce } = require('lodash/fp')
 const { toPlayerTime } = require('@podlove/utils/time')
 
 const audio = require('./audio')
@@ -17,6 +17,7 @@ const schema = (prefix) => ({
   fields: {
     id: 'ID!',
     slug: 'String',
+    mnemonic: 'String',
     title: 'String',
     subtitle: 'String',
     summary: 'String',
@@ -25,6 +26,8 @@ const schema = (prefix) => ({
     link: 'String',
     content: 'String',
     publicationDate: 'Date',
+    words: 'Int',
+    talkTime: 'Int',
     chapters: `[${chapter.name(prefix)}]`,
     audio: `[${audio.name(prefix)}]`,
     transcripts: `[${transcript.name(prefix)}]`,
@@ -35,6 +38,7 @@ const schema = (prefix) => ({
 
 const normalizer = apply({
   id: get('slug'),
+  mnemonic: get('mnemonic'),
   title: get('title'),
   subtitle: get('subtitle'),
   summary: get('summary'),
@@ -44,8 +48,7 @@ const normalizer = apply({
   content: get('content'),
   publicationDate: get('publicationDate'),
   chapters: compose(map(chapter.normalizer), getOr([], 'chapters')),
-  audio: compose(map(audio.normalizer), getOr([], 'audio')),
-  transcripts: compose(map(transcript.normalizer), getOr([], 'transcripts'))
+  audio: compose(map(audio.normalizer), getOr([], 'audio'))
 })
 
 module.exports = {
