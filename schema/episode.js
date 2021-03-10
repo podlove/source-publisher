@@ -1,4 +1,4 @@
-const { get, getOr, compose, map, reduce } = require('lodash/fp')
+const { get, getOr, compose, map } = require('lodash/fp')
 const { toPlayerTime } = require('@podlove/utils/time')
 
 const audio = require('./audio')

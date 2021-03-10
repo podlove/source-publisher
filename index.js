@@ -138,6 +138,7 @@ class PodloveSource {
     ])
 
     this.collections.episode = addCollection(episode.name(this.options.typeName))
+    this.collections.transcript = addCollection(transcript.name(this.options.typeName))
     this.collections.contributor = addCollection(contributor.name(this.options.typeName))
     this.collections.group = addCollection(group.name(this.options.typeName))
     this.collections.role = addCollection(role.name(this.options.typeName))
@@ -273,9 +274,20 @@ class PodloveSource {
     const duration = toPlayerTime(data.duration)
 
     debug(`Fetch Transcripts for Episode ${id} from ${this.routes.transcripts(id)}`)
-    const transcripts = await this.fetch(this.routes.transcripts(id), []).then(
-      map(transcript.normalizer)
-    )
+    const transcripts = await this.fetch(this.routes.transcripts(id), [])
+      .then(map(transcript.normalizer))
+      .then(
+        map((transcript) => ({
+          ...transcript,
+          speaker: this.actions.createReference(
+            contributor.name(this.options.typeName),
+            transcript.speaker
+          ),
+          episode: this.actions.createReference(episode.name(this.options.typeName), data.slug)
+        }))
+      )
+
+    transcripts.forEach((transcript) => this.collections.transcript.addNode(transcript))
 
     debug(`Fetch Contributors for Episode ${id} from ${this.routes.episodeContributors(id)}`)
     const contributorList = await this.fetch(this.routes.episodeContributors(id), []).then(
@@ -296,19 +308,14 @@ class PodloveSource {
     this.collections.episode.addNode({
       ...episode.normalizer(data),
       poster: await this.cacheImage(data.poster),
-      transcripts,
+      transcripts: transcripts.map(({ id }) =>
+        this.actions.createReference(transcript.name(this.options.typeName), id)
+      ),
       chapters,
-      timeline: transformations.timeline({ duration, chapters, transcripts }).map((item) => {
-        if (item.type === 'transcript') {
-          return {
-            ...item,
-            speaker: this.actions.createReference(
-              contributor.name(this.options.typeName),
-              item.speaker
-            )
-          }
-        }
-        return item
+      timeline: transformations.timeline({
+        duration,
+        chapters,
+        transcripts: transcripts.map(({ id }) => this.collections.transcript.getNodeById(id))
       }),
       contributors: contributorList.map((mapping) => ({
         details: this.actions.createReference(
@@ -328,9 +335,11 @@ class PodloveSource {
     })
   }
 
+  /**
+   * Statistics
+   **/
   async calculateContributorStatistic() {
     const episodes = this.collections.episode.data()
-
     const statistics = transformations.contributorStatistics(
       this.collections.contributor.data().map((item) => ({
         id: item.id,
@@ -345,12 +354,14 @@ class PodloveSource {
           role: contributor.role
         })
       )
-      data.transcripts.forEach((transcript) =>
-        statistics.update(transcript.speaker, data.id, {
-          talkTime: transcript.end - transcript.start,
-          words: wordsCounter(transcript.text).wordsCount
-        })
-      )
+      data.transcripts
+        .map(({ id }) => this.collections.transcript.getNodeById(id))
+        .forEach((transcript) =>
+          statistics.update(transcript.speaker.id, data.id, {
+            talkTime: transcript.end - transcript.start,
+            words: wordsCounter(transcript.text).wordsCount
+          })
+        )
     })
 
     statistics
@@ -362,12 +373,13 @@ class PodloveSource {
 
   async calculatePodcastStatistics() {
     const episodes = this.collections.episode.data()
-
     this.actions.addMetadata(
       statistics.name(this.options.typeName),
       episodes.reduce(
         (result, episode) => {
-          const transcripts = get(episode, 'transcripts', [])
+          const transcripts = get(episode, 'transcripts', []).map(({ id }) =>
+            this.collections.transcript.getNodeById(id)
+          )
           const words = transcripts.reduce(
             (res, transcript) => res + wordsCounter(transcript.text).wordsCount,
             0
