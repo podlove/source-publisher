@@ -2,7 +2,7 @@ const path = require('path')
 const debug = require('debug')('source-podlove')
 const { get, noop } = require('lodash')
 const { map } = require('lodash/fp')
-const sequential = require('promise-sequential')
+const pLimit = require('p-limit')
 const { toPlayerTime } = require('@podlove/utils/time')
 const wordsCounter = require('word-counting')
 
@@ -256,15 +256,19 @@ class PodloveSource {
    * Episodes
    */
   async loadEpisodes() {
+    const limiter = pLimit(10)
+
     debug(`Fetch Episodes from ${this.routes.episodes()}`)
     const episodes = await this.fetch(this.routes.episodes(), { data: [] }).then((data) =>
       get(data, 'results', [])
     )
-    await sequential(
-      episodes.map((data) => () => {
-        const id = get(data, 'id')
-        return id && this.addEpisode(id)
-      })
+    await Promise.all(
+      episodes.map((data) =>
+        limiter(() => {
+          const id = get(data, 'id')
+          return id && this.addEpisode(id)
+        })
+      )
     )
   }
 
@@ -307,6 +311,7 @@ class PodloveSource {
     debug(`Add Episode ${data.title} [${id}]`)
     this.collections.episode.addNode({
       ...episode.normalizer(data),
+      title: data.mnemonic ? data.title.replace(data.mnemonic, '').trim() : data.title,
       poster: await this.cacheImage(data.poster),
       transcripts: transcripts.map(({ id }) =>
         this.actions.createReference(transcript.name(this.options.typeName), id)
@@ -328,7 +333,7 @@ class PodloveSource {
       ...transcripts.reduce(
         (result, transcript) => ({
           talkTime: result.talkTime + (transcript.end - transcript.start),
-          words: result.words + wordsCounter(transcript.text).wordsCount
+          words: result.words + transcript.text ? wordsCounter(transcript.text).wordsCount : 0
         }),
         { talkTime: 0, words: 0 }
       )
@@ -359,7 +364,7 @@ class PodloveSource {
         .forEach((transcript) =>
           statistics.update(transcript.speaker.id, data.id, {
             talkTime: transcript.end - transcript.start,
-            words: wordsCounter(transcript.text).wordsCount
+            words: transcript.text ? wordsCounter(transcript.text).wordsCount : 0
           })
         )
     })
@@ -381,7 +386,8 @@ class PodloveSource {
             this.collections.transcript.getNodeById(id)
           )
           const words = transcripts.reduce(
-            (res, transcript) => res + wordsCounter(transcript.text).wordsCount,
+            (res, transcript) =>
+              res + (transcript.text ? wordsCounter(transcript.text).wordsCount : 0),
             0
           )
           const talkTime = transcripts.reduce(

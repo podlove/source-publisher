@@ -16,7 +16,7 @@
     "axios": "0.20.0",
     "lodash": "4.17.20",
     "debug": "4.1.1",
-    "promise-sequential": "1.1.1",
+    "p-limit": "3.1.0",
     "@podlove/utils": "5.2.3",
     "node-downloader-helper": "1.0.15",
     "hasha": "5.2.1",
